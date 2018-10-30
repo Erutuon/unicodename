@@ -12,12 +12,23 @@
 #define MINGW_HAS_SECURE_API 1 // so that _printf_p is defined
 #include <stdio.h>
 
+// Define UNICODE_DATA_IN_CURRENT_DIR if you've put UnicodeData.txt,
+// DerivedGeneralCategory.txt, and NameAliases.txt in the current directory.
 #ifndef UCD_DIRECTORY
-#define UCD_DIRECTORY                  "C:/Users/Gabriel/Documents/Unicode/11.0.0/"
+# ifdef UNICODE_DATA_IN_CURRENT_DIR
+#  define UCD_DIRECTORY                "./"
+# else
+#  define UCD_DIRECTORY                "C:/Users/Gabriel/Documents/Unicode/11.0.0/"
+# endif
 #endif
-#define UNICODE_DATA_PATH              UCD_DIRECTORY "UnicodeData.txt"
-#define DERIVED_GENERAL_CATEGORY_PATH  UCD_DIRECTORY "extracted/DerivedGeneralCategory.txt"
-#define NAME_ALIASES_PATH              UCD_DIRECTORY "NameAliases.txt"
+
+#define UNICODE_DATA_PATH              "UnicodeData.txt"
+#ifdef UNICODE_DATA_IN_CURRENT_DIR
+# define DERIVED_GENERAL_CATEGORY_PATH "DerivedGeneralCategory.txt"
+#else
+# define DERIVED_GENERAL_CATEGORY_PATH  "extracted/DerivedGeneralCategory.txt"
+#endif
+#define NAME_ALIASES_PATH              "NameAliases.txt"
 
 // Or use DerivedName.txt? Doesn't indicate control codes, surrogates, etc.
 
@@ -450,7 +461,7 @@ static char * print_reserved_name (const unichar codepoint) {
 	int items_read;
 	char * codepoint_name = NULL;
 	
-	if (!open_UCD_file("extracted/DerivedGeneralCategory.txt",
+	if (!open_UCD_file(DERIVED_GENERAL_CATEGORY_PATH,
 					   &Derived_General_Category_txt)) {
 		return NULL;
 	}
@@ -460,7 +471,7 @@ static char * print_reserved_name (const unichar codepoint) {
 			items_read = sscanf(data_line, "%x..%x", &codepoint1, &codepoint2);
 			
 			if (!(items_read == 1 || items_read == 2)) {
-				printf("Error scanning line '%s' in DerivedGeneralCategory.txt.\n",
+				printf("Error scanning line '%s' in " DERIVED_GENERAL_CATEGORY_PATH ".\n",
 					data_line);
 				return NULL;
 			}
@@ -601,12 +612,12 @@ success:
 // Sets global variables Unicode_Data_txt and Name_Aliases_txt.
 // Returns true if Unicode_Data_txt could be found.
 static bool open_Unicode_data (void) {
-	if (!get_directory(UCD_DIRECTORY, "UnicodeData.txt",
+	if (!get_directory(UCD_DIRECTORY, UNICODE_DATA_PATH,
 			"Enter directory for Unicode Character Database.",
 			&UCD_directory, &Unicode_Data_txt))
 		return false;
 	
-	if (!open_UCD_file("NameAliases.txt", &Name_Aliases_txt))
+	if (!open_UCD_file(NAME_ALIASES_PATH, &Name_Aliases_txt))
 		printf("Aliases will not be printed.\n");
 	// No error if NameAliases.txt can't be found.
 	
