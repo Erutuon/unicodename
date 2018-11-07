@@ -12,8 +12,8 @@
 #define MINGW_HAS_SECURE_API 1 // so that _printf_p is defined
 #include <stdio.h>
 
-// Define UNICODE_DATA_IN_CURRENT_DIR if you've put UnicodeData.txt,
-// DerivedGeneralCategory.txt, and NameAliases.txt in the current directory.
+// Define UNICODE_DATA_IN_CURRENT_DIR if you've put UnicodeData.txt and
+// NameAliases.txt in the current directory.
 #ifndef UCD_DIRECTORY
 # ifdef UNICODE_DATA_IN_CURRENT_DIR
 #  define UCD_DIRECTORY                "./"
@@ -23,11 +23,6 @@
 #endif
 
 #define UNICODE_DATA_PATH              "UnicodeData.txt"
-#ifdef UNICODE_DATA_IN_CURRENT_DIR
-# define DERIVED_GENERAL_CATEGORY_PATH "DerivedGeneralCategory.txt"
-#else
-# define DERIVED_GENERAL_CATEGORY_PATH  "extracted/DerivedGeneralCategory.txt"
-#endif
 #define NAME_ALIASES_PATH              "NameAliases.txt"
 
 // Or use DerivedName.txt? Doesn't indicate control codes, surrogates, etc.
@@ -43,6 +38,11 @@
 
 #define CODEPOINT_VALID(cp) BETWEEN((cp), 0, 0x10FFFF)
 #define CODEPOINT_STR_LEN    7 // "XXXXXX"
+
+// Noncharacters: U+FDD0-U+FDEF and all codepoints ending in FFFE or FFFF.
+// https://www.unicode.org/faq/private_use.html#nonchar4
+#define IS_NONCHARACTER(codepoint) \
+	(BETWEEN((codepoint), 0xFDD0, 0xFDEF) || ((codepoint) & 0xFFFE) == 0xFFFE)
 
 #define STR_EQ(str1, str2) (strcmp((str1), (str2)) == 0)
 #define STR_INCLUDES(str1, str2) (strstr((str1), (str2)) != NULL)
@@ -80,7 +80,7 @@ typedef uint32_t unichar;
 
 FILE * Unicode_Data_txt = NULL, * Name_Aliases_txt = NULL;
 
-char * rasprintf (char * s, char * format, ...) {
+char * rasprintf (char * s, const char * format, ...) {
 	va_list args;
 	va_start(args, format);
 	
@@ -120,9 +120,8 @@ static size_t read_line (FILE * f, char * const buf, const size_t len) {
 	
 	if (f == NULL) return -1;
 	
-	while (i < len && (c = fgetc(f), c != EOF) && c != '\n') {
+	while (i < len && (c = fgetc(f), c != EOF) && c != '\n')
 		buf[i++] = c;
-	}
 	buf[i] = '\0';
 	
 	if (c == EOF) {
@@ -134,18 +133,6 @@ static size_t read_line (FILE * f, char * const buf, const size_t len) {
 	else if (c != '\n') clear_line(f);
 	
 	return i;
-}
-
-// str1 and str2 must be null-terminated.
-// Less efficient alternative:
-// #define str_begins_with(str1, str2) strstr(str1, str2) == str1
-static bool str_begins_with (const char * str1, const char * str2) {
-	if (str1 == NULL || str2 == NULL) return false;
-	
-	while (*str1 && *str2)
-		if (*str1++ != *str2++) return false;
-	
-	return *str2 == '\0';
 }
 
 // Requires global UCD_directory not to be NULL.
@@ -278,9 +265,6 @@ static char * get_data_field (char * const codepoint_data_entry, const int field
 }
 
 #define SYLLABLE_BASE  0xAC00
-// #define LEAD_BASE      0x1100
-// #define VOWEL_BASE     0x1161
-// #define TRAIL_BASE     0x11A7
 #define FIRST_HANGUL_SYLLABLE SYLLABLE_BASE
 #define LAST_HANGUL_SYLLABLE  0xD7A3
 #define IS_HANGUL_SYLLABLE(codepoint) \
@@ -303,11 +287,9 @@ static const char * const trails[] = {
 	"H"
 };
 
-// #define LEAD_COUNT      ARR_LEN(leads)
 #define VOWEL_COUNT     ARR_LEN(vowels)
 #define TRAIL_COUNT     ARR_LEN(trails)
 #define FINAL_COUNT    (VOWEL_COUNT * TRAIL_COUNT)
-// #define SYLLABLE_COUNT (LEAD_COUNT * FINAL_COUNT)
 
 // Result is undefined if codepoint is not in fact a Hangul syllable.
 // Hangul Syllable Decomposition and Hangul Name Generation in
@@ -352,7 +334,6 @@ static bool aliases_list_realloc_aliases (aliases_list * aliases, int size) {
 	void * old_aliases_list = aliases->list;
 	aliases->list = realloc(aliases->list, size * sizeof *aliases->list);
 	if (aliases->list != NULL) {
-		/* printf("current size: %d; new size: %d\n", aliases->size, size);*/
 		aliases->size = size; return true;
 	}
 	else {
@@ -375,14 +356,18 @@ static aliases_list * aliases_list_new () {
 	return aliases;
 }
 
-static bool aliases_list_resize (aliases_list * aliases) {
+static bool aliases_list_expand (aliases_list * aliases) {
+	if (aliases->size > INT_MAX / 2) {
+		fprintf(stderr, "Integer overflow");
+		return false;
+	}
 	return aliases_list_realloc_aliases(aliases, aliases->size * 2);
 }
 
 // alias must be an allocated null-terminated string.
 static bool aliases_list_add (aliases_list * aliases, char * alias) {
 	++aliases->length;
-	if (aliases->length > aliases->size && !aliases_list_resize(aliases))
+	if (aliases->length > aliases->size && !aliases_list_expand(aliases))
 		return false;
 	aliases->list[aliases->length - 1] = alias;
 	return true;
@@ -448,47 +433,43 @@ static char * print_aliases_list (const unichar codepoint) {
 	return printed;
 }
 
-// Check that codepoint is listed in Unassigned section of
-// DerivedGeneralCategory.txt; if so, assume it is reserved and print its placeholder name.
-// This should only be called after it has been determined that the codepoint is
-// not a non-character.
-// Probably not necessary: any codepoint that does not have a name or label and is
-// not a noncharacter is probably reserved.
-static char * print_reserved_name (const unichar codepoint) {
-	FILE * Derived_General_Category_txt;
-	static char data_line[BUFSIZ + 1];
-	unichar codepoint1, codepoint2;
-	int items_read;
-	char * codepoint_name = NULL;
-	
-	if (!open_UCD_file(DERIVED_GENERAL_CATEGORY_PATH,
-					   &Derived_General_Category_txt)) {
-		return NULL;
-	}
-	
-	while (read_line(Derived_General_Category_txt, data_line, BUFSIZ) != EOF) {
-		if (isxdigit(data_line[0])) {
-			items_read = sscanf(data_line, "%x..%x", &codepoint1, &codepoint2);
-			
-			if (!(items_read == 1 || items_read == 2)) {
-				printf("Error scanning line '%s' in " DERIVED_GENERAL_CATEGORY_PATH ".\n",
-					data_line);
-				return NULL;
-			}
-			
-			if (((items_read == 2 ? codepoint2 : codepoint1) >= codepoint)
-					|| codepoint2 == 0x10FFFF)
-				break;
-		}
-	}
-	
-	if (items_read == 2 ? BETWEEN(codepoint, codepoint1, codepoint2)
-			: codepoint == codepoint1)
-		codepoint_name = ASPRINTF("<reserved-%04X>", codepoint);
+typedef struct name_pattern {
+	const unichar low, high;
+	const char * const format;
+} name_pattern;
 
-	if (fclose(Derived_General_Category_txt)) perror("Failed to close file");
-	
-	return codepoint_name;
+// The names and labels here are described in chapter 4 of the Unicode specification:
+// https://www.unicode.org/versions/Unicode11.0.0/ch04.pdf
+static const name_pattern name_patterns[] = {
+	{ 0x000000, 0x00001F, "<control-%04X>" },
+	{ 0x00007F, 0x00009F, "<control-%04X>" },
+	{ 0x003400, 0x004DB5, "CJK UNIFIED IDEOGRAPH-%04X" },
+	{ 0x004E00, 0x009FEF, "CJK UNIFIED IDEOGRAPH-%04X" },
+	{ 0x00D800, 0x00DFFF, "<surrogate-%04X>" },
+	{ 0x00E000, 0x00F8FF, "<private-use-%04X>" },
+	{ 0x00F900, 0x00FA6D, "CJK COMPATIBILITY IDEOGRAPH-%04X" },
+	{ 0x00FA70, 0x00FAD9, "CJK COMPATIBILITY IDEOGRAPH-%04X" },
+	{ 0x017000, 0x0187F1, "TANGUT IDEOGRAPH-%04X" },
+	{ 0x01B170, 0x01B2FB, "NUSHU CHARACTER-%04X" },
+	{ 0x020000, 0x02A6D6, "CJK UNIFIED IDEOGRAPH-%04X" },
+	{ 0x02A700, 0x02B734, "CJK UNIFIED IDEOGRAPH-%04X" },
+	{ 0x02B740, 0x02B81D, "CJK UNIFIED IDEOGRAPH-%04X" },
+	{ 0x02B820, 0x02CEA1, "CJK UNIFIED IDEOGRAPH-%04X" },
+	{ 0x02CEB0, 0x02EBE0, "CJK UNIFIED IDEOGRAPH-%04X" },
+	{ 0x02F800, 0x02FA1D, "CJK COMPATIBILITY IDEOGRAPH-%04X" },
+	{ 0x0F0000, 0x0FFFFD, "<private-use-%04X>" },
+	{ 0x100000, 0x1FFFFD, "<private-use-%04X>" }
+};
+
+// Return allocated string if code point has rule, NULL otherwise.
+static char * get_name_by_rule (unichar codepoint) {
+	for (int i = 0; i < ARR_LEN(name_patterns); ++i) {
+		const name_pattern * patt = &name_patterns[i];
+		if (codepoint < patt->low) break;
+		else if (codepoint <= patt->high)
+			return ASPRINTF(patt->format, codepoint);
+	}
+	return NULL;
 }
 
 static char * get_codepoint_name (unichar codepoint) {
@@ -496,41 +477,19 @@ static char * get_codepoint_name (unichar codepoint) {
 	char * codepoint_name = NULL;
 	
 	if (!CODEPOINT_VALID(codepoint)) return codepoint_name;
-	else if (IS_HANGUL_SYLLABLE(codepoint)) {
+	else if (IS_HANGUL_SYLLABLE(codepoint))
 		codepoint_name = get_Hangul_syllable_name(codepoint);
+	else if (IS_NONCHARACTER(codepoint))
+		codepoint_name = ASPRINTF("<noncharacter-%04X>", codepoint);
+	else if (codepoint_name = get_name_by_rule(codepoint), codepoint_name != NULL)
 		return codepoint_name;
-	}
 	else if (get_data_entry(Unicode_Data_txt, codepoint, data_line, BUFSIZ)) {
 		codepoint_name = get_data_field(data_line, UNICODE_DATA_NAME);
 		
 		if (codepoint_name == NULL) return NULL;
 		
 		if (codepoint_name[0] == '<') {
-			// section 4.8, Unicode Name Property,
-			// in https://www.unicode.org/versions/Unicode11.0.0/ch04.pdf#G2082
-			if (STR_EQ(codepoint_name, "<control>")) {
-				char * aliases_printed = print_aliases_list(codepoint);
-				codepoint_name = rasprintf(codepoint_name,
-					"<control-" UNICODE_DATA_CODEPOINT_FORMAT "> (%s)", codepoint, aliases_printed);
-				free(aliases_printed);
-			}
-			else {
-				static const struct {
-					char * signature, * format;
-				} formats[] = {
-					{ "CJK Ideograph",    "CJK UNIFIED IDEOGRAPH-" UNICODE_DATA_CODEPOINT_FORMAT },
-					{ "Surrogate",        "<surrogate-" UNICODE_DATA_CODEPOINT_FORMAT ">" },
-					{ "Tangut Ideograph", "TANGUT IDEOGRAPH-" UNICODE_DATA_CODEPOINT_FORMAT },
-					{ "Private Use",      "<private-use-" UNICODE_DATA_CODEPOINT_FORMAT ">" }
-				};
-				
-				for (int i = 0; i < ARR_LEN(formats); ++i) {
-					if (STR_INCLUDES(codepoint_name, formats[i].signature)) {
-						rasprintf(codepoint_name, formats[i].format, codepoint);
-						break;
-					}
-				}
-			}
+			// Should already have printed name above!
 		}
 		else {
 			char * aliases = print_aliases_list(codepoint);
@@ -541,12 +500,7 @@ static char * get_codepoint_name (unichar codepoint) {
 			}
 		}
 	}
-	// Noncharacters
-	// https://www.unicode.org/faq/private_use.html#nonchar4
-	// U+FDD0-U+FDEF and all codepoints ending in FFFE or FFFF
-	else if (BETWEEN(codepoint, 0xFDD0, 0xFDEF) || (codepoint & 0xFFFE) == 0xFFFE)
-		codepoint_name = ASPRINTF("<noncharacter-%04X>", codepoint);
-	else codepoint_name = print_reserved_name(codepoint);
+	else codepoint_name = ASPRINTF("<reserved-%04X>", codepoint);
 	
 	return codepoint_name;
 }
