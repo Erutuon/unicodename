@@ -495,7 +495,8 @@ static char * get_codepoint_name (unichar codepoint) {
 	static char data_line[BUFSIZ + 1];
 	char * codepoint_name = NULL;
 	
-	if (IS_HANGUL_SYLLABLE(codepoint)) {
+	if (!CODEPOINT_VALID(codepoint)) return codepoint_name;
+	else if (IS_HANGUL_SYLLABLE(codepoint)) {
 		codepoint_name = get_Hangul_syllable_name(codepoint);
 		return codepoint_name;
 	}
@@ -624,15 +625,13 @@ static bool open_Unicode_data (void) {
 	return true;
 }
 
-int main () {
+static void do_prompt (void) {
 	unichar codepoint;
 	char * codepoint_name;
 	
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	
 	puts("To exit, press enter.");
-	
-	if (!open_Unicode_data()) exit(EXIT_FAILURE); // Open Unicode_Data_txt and optionally Name_Aliases_txt.
 
 	while (codepoint = read_codepoint(), codepoint != -1) {
 		codepoint_name = get_codepoint_name(codepoint);
@@ -644,7 +643,28 @@ int main () {
 		
 		FREE0(codepoint_name);
 	}
+}
+
+int main (int argc, const char * * argv) {
+	if (!open_Unicode_data()) exit(EXIT_FAILURE); // Open Unicode_Data_txt and optionally Name_Aliases_txt.
 	
+	if (argc > 1) {
+		unichar codepoint;
+		char * codepoint_name;
+		for (int i = 1; i < argc; ++i) {
+			if (sscanf(argv[i], "%x", &codepoint) != 1 || !CODEPOINT_VALID(codepoint))
+				puts("error");
+			else {
+				codepoint_name = get_codepoint_name(codepoint);
+				if (codepoint_name != NULL && puts(codepoint_name) == EOF)
+					goto close_files;
+				FREE0(codepoint_name);
+			}
+		}
+	}
+	else do_prompt();
+	
+close_files:
 	if (fclose(Unicode_Data_txt) || Name_Aliases_txt != NULL && fclose(Name_Aliases_txt))
 		perror("Failed to close file");
 	
