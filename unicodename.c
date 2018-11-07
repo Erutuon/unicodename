@@ -196,7 +196,8 @@ read_input:
 
 // Returns true if data entry for codepoint was found.
 static bool get_data_entry (FILE * data_file, const unichar codepoint,
-							char * const data_line, const size_t data_line_len) {
+							char * const data_line, const size_t data_line_len,
+							bool start_over) {
 	static char cur_data_line[BUFSIZ + 1];
 	unichar cur_codepoint;
 	
@@ -205,7 +206,8 @@ static bool get_data_entry (FILE * data_file, const unichar codepoint,
 		return NULL;
 	}
 	
-	rewind(data_file);
+	if (start_over)
+		rewind(data_file);
 	
 	while (read_line(data_file, cur_data_line, data_line_len) != EOF
 			&& sscanf(cur_data_line, "%x", &cur_codepoint) == 1
@@ -461,48 +463,71 @@ static const name_pattern name_patterns[] = {
 	{ 0x100000, 0x1FFFFD, "<private-use-%04X>" }
 };
 
-// Return allocated string if code point has rule, NULL otherwise.
-static char * get_name_by_rule (unichar codepoint) {
-	for (int i = 0; i < ARR_LEN(name_patterns); ++i) {
-		const name_pattern * patt = &name_patterns[i];
-		if (codepoint < patt->low) break;
-		else if (codepoint <= patt->high)
-			return ASPRINTF(patt->format, codepoint);
+static char * get_name_by_rule (const unichar codepoint) {
+	if (IS_HANGUL_SYLLABLE(codepoint))
+		return get_Hangul_syllable_name(codepoint);
+	else if (IS_NONCHARACTER(codepoint))
+		return ASPRINTF("<noncharacter-%04X>", codepoint);
+	else {
+		for (int i = 0; i < ARR_LEN(name_patterns); ++i) {
+			const name_pattern * patt = &name_patterns[i];
+			if (codepoint < patt->low) break;
+			else if (codepoint <= patt->high) {
+				return ASPRINTF(patt->format, codepoint);
+			}
+		}
 	}
 	return NULL;
 }
 
-static char * get_codepoint_name (unichar codepoint) {
+#define CAST_AND_DEREFERENCE_CODEPOINT(cp) (*(unichar *) cp)
+static int comp_codepoints(const void * p1, const void * p2) {
+	unichar a = CAST_AND_DEREFERENCE_CODEPOINT(p1),
+		    b = CAST_AND_DEREFERENCE_CODEPOINT(p2);
+	return (a > b) - (a < b);
+}
+#undef CAST_AND_DEREFERENCE_CODEPOINT
+
+// Look up names of all code points in array, storing NULL if code point
+// was invalid or no name was found. Return list of names or NULL.
+// List as well as all non-NULL names must be freed.
+static char * * get_codepoint_names (unichar * const codepoints,
+									 const size_t count,
+									 char * * codepoint_names) {
 	static char data_line[BUFSIZ + 1];
-	char * codepoint_name = NULL;
+	qsort(codepoints, count, sizeof *codepoints, comp_codepoints);
+	codepoint_names = realloc(codepoint_names, sizeof (char *) * count);
 	
-	if (!CODEPOINT_VALID(codepoint)) return codepoint_name;
-	else if (IS_HANGUL_SYLLABLE(codepoint))
-		codepoint_name = get_Hangul_syllable_name(codepoint);
-	else if (IS_NONCHARACTER(codepoint))
-		codepoint_name = ASPRINTF("<noncharacter-%04X>", codepoint);
-	else if (codepoint_name = get_name_by_rule(codepoint), codepoint_name != NULL)
-		return codepoint_name;
-	else if (get_data_entry(Unicode_Data_txt, codepoint, data_line, BUFSIZ)) {
-		codepoint_name = get_data_field(data_line, UNICODE_DATA_NAME);
-		
-		if (codepoint_name == NULL) return NULL;
-		
-		if (codepoint_name[0] == '<') {
-			// Should already have printed name above!
-		}
-		else {
-			char * aliases = print_aliases_list(codepoint);
-			if (aliases != NULL) {
-				char * name_with_aliases = ASPRINTF("%s (%s)", codepoint_name, aliases);
-				FREE0(codepoint_name), FREE0(aliases);
-				codepoint_name = name_with_aliases;
+	for (int i = 0; i < count; ++i) {
+		const unichar codepoint = codepoints[i];
+		char * codepoint_name = NULL;
+		if (CODEPOINT_VALID(codepoint)
+				&& (codepoint_name = get_name_by_rule(codepoint), codepoint_name == NULL)) {
+			if (get_data_entry(Unicode_Data_txt, codepoint, data_line, BUFSIZ, i == 0)) {
+				codepoint_name = get_data_field(data_line, UNICODE_DATA_NAME);
+				
+				if (codepoint_name != NULL) {
+					if (codepoint_name[0] == '<') {
+						// Should already have printed name above!
+						puts("???");
+					}
+					else {
+						char * aliases = print_aliases_list(codepoint);
+						if (aliases != NULL) {
+							char * name_with_aliases =
+								ASPRINTF("%s (%s)", codepoint_name, aliases);
+							FREE0(codepoint_name), FREE0(aliases);
+							codepoint_name = name_with_aliases;
+						}
+					}
+				}
 			}
+			else codepoint_name = ASPRINTF("<reserved-%04X>", codepoint);
 		}
+		codepoint_names[i] = codepoint_name;
 	}
-	else codepoint_name = ASPRINTF("<reserved-%04X>", codepoint);
 	
-	return codepoint_name;
+	return codepoint_names;
 }
 
 static bool get_directory (char * default_directory, const char * const filename,
@@ -579,24 +604,30 @@ static bool open_Unicode_data (void) {
 	return true;
 }
 
+static void free_codepoint_names(char * * codepoint_names, size_t count) {
+	for (int i = 0; i < count; ++i) {
+		FREE0(codepoint_names[i]);
+	}
+	FREE0(codepoint_names);
+}
+
 static void do_prompt (void) {
 	unichar codepoint;
-	char * codepoint_name;
+	char * * codepoint_names = NULL;
 	
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	
 	puts("To exit, press enter.");
 
 	while (codepoint = read_codepoint(), codepoint != -1) {
-		codepoint_name = get_codepoint_name(codepoint);
+		codepoint_names = get_codepoint_names(&codepoint, 1, codepoint_names);
 		
-		if (codepoint_name != NULL)
-			_printf_p(NAME_OUTPUT_FORMAT, codepoint_name, codepoint);
+		if (codepoint_names != NULL)
+			_printf_p(NAME_OUTPUT_FORMAT, codepoint_names[0], codepoint);
 		else
 			printf("Codepoint U+%X does not have a name.\n", codepoint);
-		
-		FREE0(codepoint_name);
 	}
+	free_codepoint_names(codepoint_names, 1);
 }
 
 int main (int argc, const char * * argv) {
@@ -604,17 +635,23 @@ int main (int argc, const char * * argv) {
 	
 	if (argc > 1) {
 		unichar codepoint;
-		char * codepoint_name;
+		size_t codepoint_count = argc - 1;
+		unichar * codepoints = malloc(codepoint_count * sizeof *codepoints);
 		for (int i = 1; i < argc; ++i) {
-			if (sscanf(argv[i], "%x", &codepoint) != 1 || !CODEPOINT_VALID(codepoint))
-				puts("error");
+			if (sscanf(argv[i], "%x", &codepoint) != 1)
+				codepoints[i - 1] = -1;
 			else {
-				codepoint_name = get_codepoint_name(codepoint);
-				if (codepoint_name != NULL && puts(codepoint_name) == EOF)
-					goto close_files;
-				FREE0(codepoint_name);
+				codepoints[i - 1] = codepoint;
 			}
 		}
+		char * * codepoint_names = get_codepoint_names(codepoints, codepoint_count, NULL);
+		if (codepoint_names == NULL)
+			goto close_files;
+		
+		for (int i = 0; i < codepoint_count; ++i)
+			puts(codepoint_names[i] != NULL ? codepoint_names[i] : "error");
+		
+		free_codepoint_names(codepoint_names, codepoint_count);
 	}
 	else do_prompt();
 	
