@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <limits.h> // for INT_MAX
 
 #include "common.h"
 #include "aliases.h"

@@ -6,19 +6,21 @@ char * rasprintf (char * s, const char * format, ...) {
 	va_list args;
 	va_start(args, format);
 	
-	// Need to copy args?
-	
 	int len = vsnprintf(NULL, 0, format, args);
+  
+	va_end(args);
 	
 	char * printed = realloc(s, len + 1);
 	
 	if (printed != NULL) {
+		va_start(args, format);
+		
 		if (!((unsigned) vsnprintf(printed, len + 1, format, args) < len + 1))
 			free(printed), printed = NULL;
+		
+		va_end(args);
 	}
 	else { free(s); perror("Not enough memory"); }
-	
-	va_end(args);
 	
 	return printed;
 }

@@ -1,8 +1,14 @@
 CFLAGS = -Wall -O2 $(MYCFLAGS) -I.
 LDFLAGS = -Wall -O2 $(MYLDFLAGS)
 
-unicodename.exe: main.o unicodename.o aliases.o rasprintf.o
-	$(CC) $(CFLAGS) rasprintf.o aliases.o unicodename.o main.o -o unicodename.exe
+ifeq ($(OS), Windows_NT)
+EXE = unicodename.exe
+else # assume Unix
+EXE ?= unicodename
+endif
+
+$(EXE): main.o unicodename.o aliases.o rasprintf.o
+	$(CC) $(CFLAGS) rasprintf.o aliases.o unicodename.o main.o -o $(EXE)
 
 unicodename.o: unicodename.c unicodename.h aliases.h common.h rasprintf.h
 aliases.o: aliases.c aliases.h common.h rasprintf.h

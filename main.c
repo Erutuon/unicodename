@@ -8,8 +8,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <errno.h>
 
+#ifdef _WIN32
 #define MINGW_HAS_SECURE_API 1 // so that _printf_p is defined
+#endif
 #include <stdio.h>
 
 #include "common.h"
@@ -21,8 +24,18 @@
 #  ifdef UNICODE_DATA_IN_CURRENT_DIR
 #    define UCD_DIRECTORY  "./"
 #  else
-#    define UCD_DIRECTORY  "C:/Users/Gabriel/Documents/Unicode/11.0.0/"
+#    ifdef _WIN32
+#      define UCD_DIRECTORY  "C:/Users/Gabriel/Documents/Unicode/11.0.0/"
+#    else // for Windows Subsystem for Linux
+#      define UCD_DIRECTORY  "/mnt/c/Users/Gabriel/Documents/Unicode/11.0.0/"
+#    endif
 #  endif
+#endif
+
+#ifdef _WIN32 // Windows
+#  define my_printf_p _printf_p
+#else // Unix, hopefully
+#  define my_printf_p printf
 #endif
 
 #define UNICODE_DATA_PATH  "UnicodeData.txt"
@@ -112,7 +125,7 @@ read_input:
 #ifdef _WIN32
 #define WINDIRCHAR(c) ((c) == '\\')
 #else
-#define WINDIRCHAR(c) ((void) (c))
+#define WINDIRCHAR(c) (0)
 #endif
 #define CHAR_TO_SKIP(c) ((c) == '/' || WINDIRCHAR(c) || (c) == '\0')
 static void ensure_final_slash(char * str) {
@@ -210,7 +223,7 @@ static void do_prompt (void) {
 											  &codepoint, 1, codepoint_names);
 		
 		if (codepoint_names != NULL)
-			_printf_p(NAME_OUTPUT_FORMAT, codepoint_names[0], codepoint);
+			my_printf_p(NAME_OUTPUT_FORMAT, codepoint_names[0], codepoint);
 		else
 			printf("Codepoint U+%X does not have a name.\n", codepoint);
 	}
@@ -244,7 +257,7 @@ int main (int argc, const char * * argv) {
 	else do_prompt();
 	
 close_files:
-	if (fclose(Unicode_Data_txt) || Name_Aliases_txt != NULL && fclose(Name_Aliases_txt))
+	if (fclose(Unicode_Data_txt) || (Name_Aliases_txt != NULL && fclose(Name_Aliases_txt)))
 		perror("Failed to close file");
 	
 	return EXIT_SUCCESS;

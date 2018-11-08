@@ -92,7 +92,7 @@ static size_t clear_line (FILE * f) {
 // buf has space for len chars plus null terminator.
 // Using fgets would make it harder to determine when call clear_line.
 size_t read_line (FILE * f, char * const buf, const size_t len) {
-	char c;
+	char c = EOF; // to silence "uninitialized" error
 	size_t i = 0;
 	
 	if (f == NULL) return -1;
@@ -136,8 +136,8 @@ static bool get_data_entry (FILE * data_file, const unichar codepoint,
 		char * first_semicolon = strchr(cur_data_line, ';');
 		if (first_semicolon != NULL) {
 			char * second_field = first_semicolon + 1;
-			if (cur_codepoint == codepoint || second_field[0] == '<'
-				&& STR_INCLUDES(second_field, ", Last")) // Determine if codepoint belongs to a range.
+			if (cur_codepoint == codepoint || (second_field[0] == '<'
+				&& STR_INCLUDES(second_field, ", Last"))) // Determine if codepoint belongs to a range.
 				goto copy_line;
 		} // unlikely
 		else printf("No semicolon in line for U+%X:\n%s\n", cur_codepoint, cur_data_line);
@@ -307,30 +307,24 @@ char * * get_codepoint_names (FILE * Unicode_Data_txt,
 	for (int i = 0; i < count; ++i) {
 		const unichar codepoint = codepoints[i];
 		char * codepoint_name = NULL;
-		if (CODEPOINT_VALID(codepoint)
-				&& (codepoint_name = get_name_by_rule(codepoint), codepoint_name == NULL)) {
-			if (get_data_entry(Unicode_Data_txt, codepoint, data_line, BUFSIZ, i == 0)) {
+		if (CODEPOINT_VALID(codepoint)) {
+			if ((codepoint_name = get_name_by_rule(codepoint)) == NULL
+					&& get_data_entry(Unicode_Data_txt, codepoint, data_line, BUFSIZ, i == 0))
 				codepoint_name = get_data_field(data_line, UNICODE_DATA_NAME);
-				
-				if (codepoint_name != NULL) {
-					if (codepoint_name[0] == '<') {
-						// Should already have printed name above!
-						puts("???");
-					}
-					else {
-						char * aliases = print_aliases_list(
-							get_aliases(Name_Aliases_txt, codepoint, scanned_aliases));
-						scanned_aliases = true;
-						if (aliases != NULL) {
-							char * name_with_aliases =
-								ASPRINTF("%s (%s)", codepoint_name, aliases);
-							FREE0(codepoint_name), FREE0(aliases);
-							codepoint_name = name_with_aliases;
-						}
-					}
+			
+			if (codepoint_name == NULL)
+				codepoint_name = ASPRINTF("<reserved-%04X>", codepoint);
+			else {
+				char * aliases = print_aliases_list(
+					get_aliases(Name_Aliases_txt, codepoint, scanned_aliases));
+				scanned_aliases = true;
+				if (aliases != NULL) {
+					char * name_with_aliases =
+						ASPRINTF("%s (%s)", codepoint_name, aliases);
+					FREE0(codepoint_name), FREE0(aliases);
+					codepoint_name = name_with_aliases;
 				}
 			}
-			else codepoint_name = ASPRINTF("<reserved-%04X>", codepoint);
 		}
 		codepoint_names[i] = codepoint_name;
 	}
