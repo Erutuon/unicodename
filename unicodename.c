@@ -15,15 +15,15 @@
 // Define UNICODE_DATA_IN_CURRENT_DIR if you've put UnicodeData.txt and
 // NameAliases.txt in the current directory.
 #ifndef UCD_DIRECTORY
-# ifdef UNICODE_DATA_IN_CURRENT_DIR
-#  define UCD_DIRECTORY                "./"
-# else
-#  define UCD_DIRECTORY                "C:/Users/Gabriel/Documents/Unicode/11.0.0/"
-# endif
+#  ifdef UNICODE_DATA_IN_CURRENT_DIR
+#    define UCD_DIRECTORY  "./"
+#  else
+#    define UCD_DIRECTORY  "C:/Users/Gabriel/Documents/Unicode/11.0.0/"
+#  endif
 #endif
 
-#define UNICODE_DATA_PATH              "UnicodeData.txt"
-#define NAME_ALIASES_PATH              "NameAliases.txt"
+#define UNICODE_DATA_PATH  "UnicodeData.txt"
+#define NAME_ALIASES_PATH  "NameAliases.txt"
 
 // Or use DerivedName.txt? Doesn't indicate control codes, surrogates, etc.
 
@@ -530,6 +530,21 @@ static char * * get_codepoint_names (unichar * const codepoints,
 	return codepoint_names;
 }
 
+
+// str must have enough space for slash and null terminator after last
+// character in string that isn't a slash or null terminator.
+#ifdef _WIN32
+#define WINDIRCHAR(c) ((c) == '\\')
+#else
+#define WINDIRCHAR(c) ((void) (c))
+#endif
+#define CHAR_TO_SKIP(c) ((c) == '/' || WINDIRCHAR(c) || (c) == '\0')
+static void ensure_final_slash(char * str) {
+	size_t i = strlen(str);
+	while (CHAR_TO_SKIP(str[i])) --i;
+	str[i + 1] = '/'; str[i + 2] = '\0';
+}
+
 static bool get_directory (char * default_directory, const char * const filename,
 						   const char * message, char * * directory_var,
 						   FILE * * file_var) {
@@ -539,8 +554,9 @@ static bool get_directory (char * default_directory, const char * const filename
 	size_t len;
 	
 	// str_dup?
-	directory = ASPRINTF("%s", default_directory);
+	directory = ASPRINTF("%s//", default_directory);
 	if (directory == NULL) goto mem_err;
+	ensure_final_slash(directory);
 	
 	filepath = ASPRINTF("%s%s", directory, filename);
 	if (filepath == NULL) goto mem_err;
@@ -570,8 +586,9 @@ static bool get_directory (char * default_directory, const char * const filename
 			}
 			
 			// Make str_dup?
-			new_directory = rasprintf(directory, "%s", buf);
+			new_directory = rasprintf(directory, "%s//", buf);
 			if (new_directory == NULL) goto mem_err;
+			ensure_final_slash(new_directory);
 			directory = new_directory;
 			
 			filepath = rasprintf(filepath, "%s%s", directory, filename);
