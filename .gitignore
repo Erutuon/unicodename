@@ -2,6 +2,7 @@ georgian*
 unicodenamemultiple.c
 *.i
 specialnames.txt
+unicodename
 
 # Prerequisites
 *.d

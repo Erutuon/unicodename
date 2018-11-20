@@ -33,9 +33,9 @@
 #endif
 
 #ifdef _WIN32 // Windows
-#  define my_printf_p _printf_p
+#  define my_printf _printf_p
 #else // Unix, hopefully
-#  define my_printf_p printf
+#  define my_printf printf
 #endif
 
 #define UNICODE_DATA_PATH  "UnicodeData.txt"
@@ -223,13 +223,15 @@ static void do_prompt (void) {
 											  &codepoint, 1, codepoint_names);
 		
 		if (codepoint_names != NULL)
-			my_printf_p(NAME_OUTPUT_FORMAT, codepoint_names[0], codepoint);
+			my_printf(NAME_OUTPUT_FORMAT, codepoint_names[0], codepoint);
 		else
 			printf("Codepoint U+%X does not have a name.\n", codepoint);
 	}
 	free_codepoint_names(codepoint_names, 1);
 }
 
+// TODO: allow Unicode data directory to be specified with command line arg.
+// TODO: allow code points to be input in decimal.
 int main (int argc, const char * * argv) {
 	if (!open_Unicode_data()) exit(EXIT_FAILURE); // Open Unicode_Data_txt and optionally Name_Aliases_txt.
 	
