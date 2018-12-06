@@ -6,10 +6,10 @@ CFLAGS = -Wall -O2 $(MYCFLAGS) -I.
 # make 'MYCFLAGS=-DUCD_DIRECTORY=\"<your Unicode data directory>\"'
 
 ifeq ($(OS), Windows_NT)
-EXE = unicodename.exe
-else # assume Unix
-EXE ?= unicodename
+EXE_EXT = .exe
 endif
+
+EXE ?= unicodename$(EXE_EXT)
 
 INSTALL_DIR ?= /usr/local/bin
 

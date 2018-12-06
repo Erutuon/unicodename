@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <getopt.h>
 
 #ifdef _WIN32
 #define MINGW_HAS_SECURE_API 1 // so that _printf_p is defined
@@ -55,10 +56,12 @@
 	(fprintf(stderr, "Failed to open %s: %s\n", filepath, strerror(errno)), \
 	 fflush(stderr))
 
-char default_UCD_directory[] = UCD_DIRECTORY;
-char * UCD_directory;
+static int decimal = 0;
 
-FILE * Unicode_Data_txt = NULL, * Name_Aliases_txt = NULL;
+static char * UCD_directory;
+const char * default_UCD_directory = UCD_DIRECTORY;
+
+static FILE * Unicode_Data_txt = NULL, * Name_Aliases_txt = NULL;
 
 // Requires global UCD_directory not to be NULL.
 static bool open_UCD_file(const char * filename, FILE * * out) {
@@ -127,16 +130,18 @@ read_input:
 #else
 #define WINDIRCHAR(c) (0)
 #endif
+
 #define CHAR_TO_SKIP(c) ((c) == '/' || WINDIRCHAR(c) || (c) == '\0')
+
 static void ensure_final_slash(char * str) {
 	size_t i = strlen(str);
 	while (CHAR_TO_SKIP(str[i])) --i;
 	str[i + 1] = '/'; str[i + 2] = '\0';
 }
 
-static bool get_directory (char * default_directory, const char * const filename,
+static bool get_directory (const char * default_directory, const char * const filename,
 						   const char * message, char * * directory_var,
-						   FILE * * file_var) {
+						   FILE * * file_var, bool crash_if_not_default) {
 	FILE * file = NULL;
 	static char buf[BUFSIZ + 1];
 	char * filepath = NULL, * directory = NULL, * new_directory;
@@ -159,8 +164,12 @@ static bool get_directory (char * default_directory, const char * const filename
 			goto success;
 		}
 		else {
-			FOPEN_ERR(filepath);
-			puts(message);
+			if (crash_if_not_default)
+				exit(EXIT_FAILURE);
+			else {
+				FOPEN_ERR(filepath);
+				puts(message);
+			}
 			
 			len = read_line(stdin, buf, BUFSIZ);
 			if (len == (size_t) EOF) {
@@ -197,10 +206,10 @@ success:
 
 // Sets global variables Unicode_Data_txt and Name_Aliases_txt.
 // Returns true if Unicode_Data_txt could be found.
-static bool open_Unicode_data (void) {
-	if (!get_directory(UCD_DIRECTORY, UNICODE_DATA_PATH,
+static bool open_Unicode_data (bool crash_if_not_default) {
+	if (!get_directory(default_UCD_directory, UNICODE_DATA_PATH,
 			"Enter directory for Unicode Character Database.",
-			&UCD_directory, &Unicode_Data_txt))
+			&UCD_directory, &Unicode_Data_txt, crash_if_not_default))
 		return false;
 	
 	if (!open_UCD_file(NAME_ALIASES_PATH, &Name_Aliases_txt))
@@ -230,21 +239,83 @@ static void do_prompt (void) {
 	free_codepoint_names(codepoint_names, 1);
 }
 
+// #define UNICODENAME_DEBUG
+#ifdef UNICODENAME_DEBUG
+#define DEBUG_PRINTF(...) printf(__VA_ARGS__)
+#define DEBUG_PUTCHAR(c) putchar(c)
+#else
+#define DEBUG_PRINTF(...) ((void)(0))
+#define DEBUG_PUTCHAR(c) ((void)(0))
+#endif
+
+static int read_options (int argc, char * const * argv) {
+	static const struct option options[] = {
+		{ "directory", required_argument, NULL, 'f' },
+		{ "decimal", optional_argument, &decimal, 1 },
+		{ "hexadecimal", optional_argument, &decimal, 0 }
+	};
+	
+	int c;
+	int option_index = 0;
+	const char * directory = NULL;
+	opterr = 0;
+	while ((c = getopt_long(argc, argv, "f:dx", options, &option_index)) != -1) {
+		switch (c) {
+			case 'd': case 'x':
+				decimal = c == 'd';
+				DEBUG_PRINTF("option %c (%s)\n", c, decimal ? "decimal" : "hexadecimal");
+				break;
+			case 'f':
+				DEBUG_PRINTF("option %c (directory): %s", c, optarg);
+				if (directory == NULL)
+					directory = optarg;
+				else
+					DEBUG_PRINTF("; error: directory already provided");
+				DEBUG_PUTCHAR('\n');
+				break;
+			case 0:
+				DEBUG_PRINTF("option %s\n", options[option_index].name);
+			default:
+				DEBUG_PRINTF("invalid option %s\n", argv[optind - 1]);
+		}
+	}
+	
+	if (optind < argc) {
+		DEBUG_PRINTF("remaining arguments:\n");
+		for (int i = optind; i < argc; ++i) {
+			DEBUG_PRINTF("argument %s\n", argv[i]);
+		}
+	}
+	
+	if (directory != NULL)
+		default_UCD_directory = directory;
+	
+	return optind;
+}
+
 // TODO: allow Unicode data directory to be specified with command line arg.
 // TODO: allow code points to be input in decimal.
-int main (int argc, const char * * argv) {
-	if (!open_Unicode_data()) exit(EXIT_FAILURE); // Open Unicode_Data_txt and optionally Name_Aliases_txt.
-	
+int main (int argc, char * const * argv) {
 	if (argc > 1) {
 		unichar codepoint;
-		size_t codepoint_count = argc - 1;
+		int first_codepoint_index = read_options(argc, argv);
+		// Open Unicode_Data_txt and optionally Name_Aliases_txt.
+		// Exit if directory is not correct.
+		open_Unicode_data(true);
+		size_t codepoint_count = argc - first_codepoint_index;
+		DEBUG_PRINTF("%zd codepoints; first_codepoint_index: %d\n", codepoint_count, first_codepoint_index);
+		for (int i = 0; i < argc; ++i) {
+			DEBUG_PRINTF("arg %d: %s\n", i, argv[i]);
+		}
 		unichar * codepoints = malloc(codepoint_count * sizeof *codepoints);
-		for (int i = 1; i < argc; ++i) {
-			if (sscanf(argv[i], "%x", &codepoint) != 1)
-				codepoints[i - 1] = -1;
-			else {
-				codepoints[i - 1] = codepoint;
-			}
+		if (!(codepoint_count > 0)) {
+			fputs("no codepoints provided", stderr);
+			return EXIT_FAILURE;
+		}
+		for (int i = 0; i < codepoint_count; ++i) {
+			codepoints[i] = (sscanf(argv[first_codepoint_index + i],
+									decimal ? "%d" : "%x", &codepoint) == 1)
+							? codepoint : -1;
 		}
 		char * * codepoint_names = get_codepoint_names(
 				Unicode_Data_txt, Name_Aliases_txt, codepoints, codepoint_count, NULL);
@@ -256,7 +327,10 @@ int main (int argc, const char * * argv) {
 		
 		free_codepoint_names(codepoint_names, codepoint_count);
 	}
-	else do_prompt();
+	else {
+		if (!open_Unicode_data(false)) exit(EXIT_FAILURE); // Open Unicode_Data_txt and optionally Name_Aliases_txt.
+		do_prompt();
+	}
 	
 close_files:
 	if (fclose(Unicode_Data_txt) || (Name_Aliases_txt != NULL && fclose(Name_Aliases_txt)))
