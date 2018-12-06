@@ -239,15 +239,6 @@ static void do_prompt (void) {
 	free_codepoint_names(codepoint_names, 1);
 }
 
-// #define UNICODENAME_DEBUG
-#ifdef UNICODENAME_DEBUG
-#define DEBUG_PRINTF(...) printf(__VA_ARGS__)
-#define DEBUG_PUTCHAR(c) putchar(c)
-#else
-#define DEBUG_PRINTF(...) ((void)(0))
-#define DEBUG_PUTCHAR(c) ((void)(0))
-#endif
-
 static int read_options (int argc, char * const * argv) {
 	static const struct option options[] = {
 		{ "directory", required_argument, NULL, 'f' },
@@ -263,27 +254,11 @@ static int read_options (int argc, char * const * argv) {
 		switch (c) {
 			case 'd': case 'x':
 				decimal = c == 'd';
-				DEBUG_PRINTF("option %c (%s)\n", c, decimal ? "decimal" : "hexadecimal");
 				break;
 			case 'f':
-				DEBUG_PRINTF("option %c (directory): %s", c, optarg);
 				if (directory == NULL)
 					directory = optarg;
-				else
-					DEBUG_PRINTF("; error: directory already provided");
-				DEBUG_PUTCHAR('\n');
 				break;
-			case 0:
-				DEBUG_PRINTF("option %s\n", options[option_index].name);
-			default:
-				DEBUG_PRINTF("invalid option %s\n", argv[optind - 1]);
-		}
-	}
-	
-	if (optind < argc) {
-		DEBUG_PRINTF("remaining arguments:\n");
-		for (int i = optind; i < argc; ++i) {
-			DEBUG_PRINTF("argument %s\n", argv[i]);
 		}
 	}
 	
@@ -303,10 +278,6 @@ int main (int argc, char * const * argv) {
 		// Exit if directory is not correct.
 		open_Unicode_data(true);
 		size_t codepoint_count = argc - first_codepoint_index;
-		DEBUG_PRINTF("%zd codepoints; first_codepoint_index: %d\n", codepoint_count, first_codepoint_index);
-		for (int i = 0; i < argc; ++i) {
-			DEBUG_PRINTF("arg %d: %s\n", i, argv[i]);
-		}
 		unichar * codepoints = malloc(codepoint_count * sizeof *codepoints);
 		if (!(codepoint_count > 0)) {
 			fputs("no codepoints provided", stderr);
