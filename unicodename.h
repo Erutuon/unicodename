@@ -3,6 +3,7 @@
 
 typedef uint32_t unichar;
 
+// Most of these fields aren't used in this program.
 enum Unicode_data_fields {
 	UNICODE_DATA_CODEPOINT_FIELD               = 1,
 	UNICODE_DATA_NAME                          = 2,
@@ -25,6 +26,8 @@ size_t read_line (FILE * f, char * const buf, const size_t len);
 
 void free_codepoint_names(char * * codepoint_names, size_t count);
 
-char * * get_codepoint_names (
-	FILE * Unicode_Data_txt, FILE * Name_Aliases_txt, unichar * const codepoints,
-	const size_t count, char * * codepoint_names);
+char * * get_codepoint_names (FILE * Unicode_Data_txt,
+							  FILE * Name_Aliases_txt,
+							  unichar * const codepoints,
+							  const size_t count,
+							  char * * codepoint_names);

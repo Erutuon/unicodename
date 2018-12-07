@@ -25,14 +25,11 @@
 #  ifdef UNICODE_DATA_IN_CURRENT_DIR
 #    define UCD_DIRECTORY  "./"
 #  else
-#    ifdef _WIN32
-#      define UCD_DIRECTORY  "C:/Users/Gabriel/Documents/Unicode/11.0.0/"
-#    else // for Windows Subsystem for Linux
-#      define UCD_DIRECTORY  "/mnt/c/Users/Gabriel/Documents/Unicode/11.0.0/"
-#    endif
+#    error "Define UCD_DIRECTORY to the path for the directory that contains UnicodeData.txt and NameAliases.txt."
 #  endif
 #endif
 
+// Need printf with positional arguments.
 #ifdef _WIN32 // Windows
 #  define my_printf _printf_p
 #else // Unix, hopefully

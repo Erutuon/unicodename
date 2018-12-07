@@ -1,9 +1,12 @@
 CFLAGS = -Wall -O2 $(MYCFLAGS) -I.
 
-# To set directory in which UnicodeData.txt and NameAliases.txt are found, use this command,
-# but replace <your Unicode data directory> with the directory name.
-# It doesn't need a trailing slash.
-# make 'MYCFLAGS=-DUCD_DIRECTORY=\"<your Unicode data directory>\"'
+# To set the directory in which the program will look for
+# UnicodeData.txt and NameAliases.txt:
+# make "UCD_DIRECTORY=<your Unicode data directory>"
+# For instance, on Linux, maybe /usr/share/unicode/11.0.0.
+ifneq ($(UCD_DIRECTORY),)
+CFLAGS += -DUCD_DIRECTORY=\"$(UCD_DIRECTORY)\"
+endif
 
 ifeq ($(OS), Windows_NT)
 EXE_EXT = .exe
