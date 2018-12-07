@@ -1,5 +1,5 @@
 /*
- *  Prints name of codepoint, or aliases in the case of a control character.
+ *  Prints name of code point, or aliases in the case of a control character.
  */
 
 #include <string.h>
@@ -16,7 +16,8 @@
 
 // CODE POINT-RELATED STUFF
 
-// Noncharacters: U+FDD0-U+FDEF and all codepoints ending in FFFE or FFFF.
+// Noncharacters: U+FDD0-U+FDEF and code points whose value in hexadecimal
+// base ends in FFFE or FFFF.
 // https://www.unicode.org/faq/private_use.html#nonchar4
 #define IS_NONCHARACTER(codepoint) \
 	(BETWEEN((codepoint), 0xFDD0, 0xFDEF) || ((codepoint) & 0xFFFE) == 0xFFFE)
@@ -53,7 +54,7 @@ typedef struct name_pattern {
 	const char * const format;
 } name_pattern;
 
-// The names and labels here are described in chapter 4 of the Unicode specification:
+// These names and labels are described in chapter 4 of the Unicode specification:
 // https://www.unicode.org/versions/Unicode11.0.0/ch04.pdf
 static const name_pattern name_patterns[] = {
 	{ 0x000000, 0x00001F, "<control-%04X>" },
@@ -102,19 +103,19 @@ size_t read_line (FILE * f, char * const buf, const size_t len) {
 	buf[i] = '\0';
 	
 	if (c == EOF) {
-		if (ferror(f))
-			perror(NULL), fclose(f), exit(1);
-		else
-			return EOF;
+		if (ferror(f)) perror(NULL), fclose(f), exit(1);
+		else return EOF;
 	}
 	else if (c != '\n') clear_line(f);
 	
 	return i;
 }
 
-// Returns true if data entry for codepoint was found.
-static bool get_data_entry (FILE * data_file, const unichar codepoint,
-							char * const data_line, const size_t data_line_len,
+// Returns true if data entry for code point was found.
+static bool get_data_entry (FILE * data_file,
+							const unichar codepoint,
+							char * const data_line,
+							const size_t data_line_len,
 							bool start_over) {
 	static char cur_data_line[BUFSIZ + 1];
 	unichar cur_codepoint;
@@ -124,46 +125,45 @@ static bool get_data_entry (FILE * data_file, const unichar codepoint,
 		return NULL;
 	}
 	
-	if (start_over)
-		rewind(data_file);
+	if (start_over) rewind(data_file);
 	
 	while (read_line(data_file, cur_data_line, data_line_len) != EOF
 			&& sscanf(cur_data_line, "%x", &cur_codepoint) == 1
 			&& cur_codepoint < codepoint);
 	
-	/* printf("%X\n", cur_codepoint);*/
 	if (cur_codepoint >= codepoint) {
 		char * first_semicolon = strchr(cur_data_line, ';');
 		if (first_semicolon != NULL) {
 			char * second_field = first_semicolon + 1;
-			if (cur_codepoint == codepoint || (second_field[0] == '<'
-				&& STR_INCLUDES(second_field, ", Last"))) // Determine if codepoint belongs to a range.
-				goto copy_line;
+			if (cur_codepoint == codepoint
+					// Determine if code point belongs to a range.
+					|| (second_field[0] == '<'
+					&& STR_INCLUDES(second_field, ", Last"))) {
+				strncpy(data_line, cur_data_line, data_line_len);
+				return true;
+			}
 		} // unlikely
-		else printf("No semicolon in line for U+%X:\n%s\n", cur_codepoint, cur_data_line);
-		
+		else fprintf(stderr, "No semicolon in line for U+%X:\n%s\n",
+			cur_codepoint, cur_data_line);
 	}
 	return false;
-	
-copy_line:
-	strcpy(data_line, cur_data_line); // TODO: Use strncpy for safety.
-	return true;
 }
 
-static char * get_data_field (char * const codepoint_data_entry, const int field) {
+static char * get_data_field (char * const codepoint_data_entry,
+							  const unsigned int field) {
 	if (codepoint_data_entry == NULL)
 		return NULL;
 	
-	const char * field_start = codepoint_data_entry, * field_end = NULL,
+	const char * field_start = codepoint_data_entry,
+		* field_end = NULL,
 		* next_semicolon;
+	size_t field_len = 0;
 	int i = 0;
 	
 	while (i < field) {
 		++i;
-		next_semicolon = strchr(field_end != NULL
-			? field_end + 1 : codepoint_data_entry, ';');
-		
 		if (field_end != NULL) field_start = field_end + 1;
+		next_semicolon = strchr(field_start, ';');
 		
 		if (next_semicolon != NULL) field_end = next_semicolon;
 		else { // end of entry
@@ -171,21 +171,21 @@ static char * get_data_field (char * const codepoint_data_entry, const int field
 			break;
 		}
 	}
-	if (i == field && field_end - field_start > 0) {
-		char * field_value = malloc(--field_end - field_start + 2);
+	if (i == field && (field_len = field_end - field_start) > 0) {
+		char * field_value = malloc(field_len + 1);
 		
 		MEM_ERR_RETURN_NULL(field_value);
 		
-		strncpy(field_value, field_start, field_end - field_start + 1);
-		field_value[field_end - field_start + 1] = '\0';
+		strncpy(field_value, field_start, field_len);
+		field_value[field_len] = '\0';
 		
 		return field_value;
 	}
-	else return NULL;
+	return NULL;
 }
 
-// Result is undefined if codepoint is not in fact a Hangul syllable.
-// Hangul Syllable Decomposition and Hangul Name Generation in
+// Result is undefined if code point is not a Hangul syllable.
+// Hangul Name Generation is described in chapter 3 of the Unicode specification:
 // https://www.unicode.org/versions/Unicode10.0.0/ch03.pdf
 static char * get_Hangul_syllable_name (unichar codepoint) {
 	int syllable_index =  codepoint - SYLLABLE_BASE;
@@ -196,14 +196,13 @@ static char * get_Hangul_syllable_name (unichar codepoint) {
 	if (lead_index  >= sizeof leads
 	 || vowel_index >= sizeof vowels
 	 || trail_index >= sizeof trails) {
-		printf("Hangul Syllable name getting failed.\n"); return NULL;
+		fputs("Hangul Syllable name getting failed.", stderr); return NULL;
 	}
 	
 	return ASPRINTF("HANGUL SYLLABLE %s%s%s",
 		leads[lead_index], vowels[vowel_index], trails[trail_index]);
 }
 
-// Requires global variable Name_Aliases_txt.
 static aliases_list * get_aliases (FILE * Name_Aliases_txt,
 								   const unichar codepoint,
 								   bool start_over) {
@@ -213,7 +212,7 @@ static aliases_list * get_aliases (FILE * Name_Aliases_txt,
 	unichar cur_codepoint;
 	
 	if (Name_Aliases_txt == NULL) {
-		puts("Name_Aliases_txt is NULL.");
+		fputs("Name_Aliases_txt is NULL.", stderr);
 		return NULL;
 	}
 	
@@ -223,7 +222,7 @@ static aliases_list * get_aliases (FILE * Name_Aliases_txt,
 	while (read_line(Name_Aliases_txt, data_line, BUFSIZ) != EOF) {
 		if (isxdigit(data_line[0])) {
 			if (sscanf(data_line, "%x", &cur_codepoint) != 1) {
-				printf("Error scanning line '%s'", data_line); return NULL;
+				fprintf(stderr, "Error scanning line '%s'", data_line); return NULL;
 			}
 			
 			if (cur_codepoint == codepoint) {
@@ -274,15 +273,14 @@ static char * get_name_by_rule (const unichar codepoint) {
 		for (int i = 0; i < ARR_LEN(name_patterns); ++i) {
 			const name_pattern * patt = &name_patterns[i];
 			if (codepoint < patt->low) break;
-			else if (codepoint <= patt->high) {
+			else if (codepoint <= patt->high)
 				return ASPRINTF(patt->format, codepoint);
-			}
 		}
 	}
 	return NULL;
 }
 
-#define CAST_AND_DEREFERENCE_CODEPOINT(cp) (*(unichar *) cp)
+#define CAST_AND_DEREFERENCE_CODEPOINT(cp) (*(unichar *) (cp))
 static int comp_codepoints(const void * p1, const void * p2) {
 	unichar a = CAST_AND_DEREFERENCE_CODEPOINT(p1),
 		    b = CAST_AND_DEREFERENCE_CODEPOINT(p2);
@@ -294,10 +292,10 @@ static int comp_codepoints(const void * p1, const void * p2) {
 // was invalid or no name was found. Return list of names or NULL.
 // List as well as all non-NULL names must be freed.
 char * * get_codepoint_names (FILE * Unicode_Data_txt,
-							 FILE * Name_Aliases_txt,
-							 unichar * const codepoints,
-							 const size_t count,
-							 char * * codepoint_names) {
+							  FILE * Name_Aliases_txt,
+							  unichar * const codepoints,
+							  const size_t count,
+							  char * * codepoint_names) {
 	static char data_line[BUFSIZ + 1];
 	qsort(codepoints, count, sizeof *codepoints, comp_codepoints);
 	codepoint_names = realloc(codepoint_names, sizeof (char *) * count);
@@ -309,7 +307,7 @@ char * * get_codepoint_names (FILE * Unicode_Data_txt,
 		char * codepoint_name = NULL;
 		if (CODEPOINT_VALID(codepoint)) {
 			if ((codepoint_name = get_name_by_rule(codepoint)) == NULL
-					&& get_data_entry(Unicode_Data_txt, codepoint, data_line, BUFSIZ, i == 0))
+				&& get_data_entry(Unicode_Data_txt, codepoint, data_line, BUFSIZ, i == 0))
 				codepoint_name = get_data_field(data_line, UNICODE_DATA_NAME);
 			
 			if (codepoint_name == NULL)
@@ -333,8 +331,6 @@ char * * get_codepoint_names (FILE * Unicode_Data_txt,
 }
 
 void free_codepoint_names(char * * codepoint_names, size_t count) {
-	for (int i = 0; i < count; ++i) {
-		FREE0(codepoint_names[i]);
-	}
+	for (int i = 0; i < count; ++i) FREE0(codepoint_names[i]);
 	FREE0(codepoint_names);
 }
