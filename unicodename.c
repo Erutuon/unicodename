@@ -22,6 +22,12 @@
 #define IS_NONCHARACTER(codepoint) \
 	(BETWEEN((codepoint), 0xFDD0, 0xFDEF) || ((codepoint) & 0xFFFE) == 0xFFFE)
 
+#define IS_BRAILLE_PATTERN(codepoint) \
+	(0x2801 <= (codepoint) && (codepoint) <= 0x28FF)
+#define BRAILLE_PATTERN_PREFIX "BRAILLE PATTERN DOTS-"
+#define BRAILLE_PATTERN_PREFIX_LEN (sizeof BRAILLE_PATTERN_PREFIX - 1)
+#define MAX_BRAILLE_PATTERN_LEN (BRAILLE_PATTERN_PREFIX_LEN + 8 + 1)
+
 #define SYLLABLE_BASE  0xAC00
 #define FIRST_HANGUL_SYLLABLE SYLLABLE_BASE
 #define LAST_HANGUL_SYLLABLE  0xD7A3
@@ -184,7 +190,7 @@ static char * get_data_field (char * const codepoint_data_entry,
 	return NULL;
 }
 
-// Result is undefined if code point is not a Hangul syllable.
+// Result is undefined if code point is not a Hangul syllable (U+AC00-U+D7A3).
 // Hangul Name Generation is described in chapter 3 of the Unicode specification:
 // https://www.unicode.org/versions/Unicode10.0.0/ch03.pdf
 static char * get_Hangul_syllable_name (unichar codepoint) {
@@ -201,6 +207,31 @@ static char * get_Hangul_syllable_name (unichar codepoint) {
 	
 	return ASPRINTF("HANGUL SYLLABLE %s%s%s",
 		leads[lead_index], vowels[vowel_index], trails[trail_index]);
+}
+
+// Result is undefined if code point is not a braille pattern (U+2800-U+28FF).
+// The last 8 digits of the codepoint of a braille pattern (minus 0x2800) are
+// a bitmask indicating which of the dots 1 to 8 are colored black (punched).
+static char * get_braille_pattern_name (int codepoint) {
+	int pow = 0;
+	int pattern_num = codepoint - 0x2800;
+	char * const mem = malloc(MAX_BRAILLE_PATTERN_LEN);
+	char * ptr = mem;
+	if (pattern_num == 0) {
+		strcpy(mem, "BRAILLE PATTERN BLANK");
+	} else {
+		memcpy(ptr, BRAILLE_PATTERN_PREFIX, BRAILLE_PATTERN_PREFIX_LEN);
+		ptr += BRAILLE_PATTERN_PREFIX_LEN;
+		while (pattern_num > 0) {
+			++pow;
+			if (pattern_num & 1) {
+				*ptr++ = '0' + pow;
+			}
+			pattern_num /= 2;
+		}
+		*ptr = '\0';
+	}
+	return mem;
 }
 
 static aliases_list * get_aliases (FILE * Name_Aliases_txt,
@@ -265,7 +296,9 @@ static char * print_aliases_list (aliases_list * aliases) {
 }
 
 static char * get_name_by_rule (const unichar codepoint) {
-	if (IS_HANGUL_SYLLABLE(codepoint))
+	if (IS_BRAILLE_PATTERN(codepoint))
+		return get_braille_pattern_name(codepoint);
+	else if (IS_HANGUL_SYLLABLE(codepoint))
 		return get_Hangul_syllable_name(codepoint);
 	else if (IS_NONCHARACTER(codepoint))
 		return ASPRINTF("<noncharacter-%04X>", codepoint);
