@@ -60,7 +60,6 @@ const char * default_UCD_directory = UCD_DIRECTORY;
 
 static FILE * Unicode_Data_txt = NULL, * Name_Aliases_txt = NULL;
 
-// Requires global UCD_directory not to be NULL.
 static bool open_UCD_file(const char * filename, FILE * * out) {
 	char * filepath = NULL;
 	FILE * datafile = NULL;
@@ -287,6 +286,7 @@ int main (int argc, char * const * argv) {
 		}
 		char * * codepoint_names = get_codepoint_names(
 				Unicode_Data_txt, Name_Aliases_txt, codepoints, codepoint_count, NULL);
+		free(codepoints);
 		if (codepoint_names == NULL)
 			goto close_files;
 		
@@ -301,6 +301,8 @@ int main (int argc, char * const * argv) {
 	}
 	
 close_files:
+	if (UCD_directory != default_UCD_directory)
+		free(UCD_directory);
 	if (fclose(Unicode_Data_txt) || (Name_Aliases_txt != NULL && fclose(Name_Aliases_txt)))
 		perror("Failed to close file");
 	
