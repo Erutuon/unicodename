@@ -13,6 +13,7 @@
 #define STR_INCLUDES(str1, str2) (strstr((str1), (str2)) != NULL)
 #define FREE0(pointer) ((pointer) != NULL ? free(pointer), (pointer) = NULL : NULL)
 #define ARR_LEN(arr) (sizeof (arr) / sizeof *(arr))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 // CODE POINT-RELATED STUFF
 
@@ -33,6 +34,10 @@
 #define LAST_HANGUL_SYLLABLE  0xD7A3
 #define IS_HANGUL_SYLLABLE(codepoint) \
 	(BETWEEN((codepoint), FIRST_HANGUL_SYLLABLE, LAST_HANGUL_SYLLABLE))
+#define IS_VARIATION_SELECTOR(codepoint) \
+	(BETWEEN((codepoint), 0xFE00, 0xFE0F) \
+	|| BETWEEN((codepoint), 0xE0100, 0xE01EF))
+#define IS_DOMINO_TILE(codepoint) (BETWEEN((codepoint), 0x1F030, 0x1F093))
 
 // Jamo.txt
 static const char * const leads[] = {
@@ -190,10 +195,20 @@ static char * get_data_field (char * const codepoint_data_entry,
 	return NULL;
 }
 
+// NAME FUNCTIONS
+
+/*
+ * U+2800-U+28FF:   get_braille_pattern_name
+ * U+AC00-U+D7A3:   get_Hangul_syllable_name
+ * U+FE00-U+FE0F:   get_variation_selector_name
+ * U+1F030-U+1F093: get_domino_tile_name
+ * U+E0100-U+E01EF: get_variation_selector_name
+ */
+
 // Result is undefined if code point is not a Hangul syllable (U+AC00-U+D7A3).
 // Hangul Name Generation is described in chapter 3 of the Unicode specification:
 // https://www.unicode.org/versions/Unicode10.0.0/ch03.pdf
-static char * get_Hangul_syllable_name (unichar codepoint) {
+static char * get_Hangul_syllable_name (const unichar codepoint) {
 	int syllable_index =  codepoint - SYLLABLE_BASE;
 	int lead_index     =  syllable_index / FINAL_COUNT;
 	int vowel_index    = (syllable_index % FINAL_COUNT) / TRAIL_COUNT;
@@ -212,10 +227,11 @@ static char * get_Hangul_syllable_name (unichar codepoint) {
 // Result is undefined if code point is not a braille pattern (U+2800-U+28FF).
 // The last 8 digits of the codepoint of a braille pattern (minus 0x2800) are
 // a bitmask indicating which of the dots 1 to 8 are colored black (punched).
-static char * get_braille_pattern_name (int codepoint) {
+static char * get_braille_pattern_name (const unichar codepoint) {
 	int pow = 0;
 	int pattern_num = codepoint - 0x2800;
 	char * const mem = malloc(MAX_BRAILLE_PATTERN_LEN);
+	MEM_ERR_RETURN_NULL(mem)
 	char * ptr = mem;
 	if (pattern_num == 0) {
 		strcpy(mem, "BRAILLE PATTERN BLANK");
@@ -232,6 +248,38 @@ static char * get_braille_pattern_name (int codepoint) {
 		*ptr = '\0';
 	}
 	return mem;
+}
+
+// Result is undefined if code point is not a variation selector
+// (U+FE00-U+FE0F, U+E0100-U+E01EF).
+static char * get_variation_selector_name (const unichar codepoint) {
+	char * name = ASPRINTF("VARIATION SELECTOR-%d",
+		(codepoint <= 0xFE0F ? codepoint - 0xFE00  + 1
+							 : codepoint - 0xE0100 + 17));
+	MEM_ERR_RETURN_NULL(name)
+	return name;
+}
+
+// Result is undefined if code point is not a domino tile
+// (U+1F030-U+1F093).
+static char * get_domino_tile_name (const unichar codepoint) {
+	int num;
+	const char * orientation;
+	char suffix[MAX(sizeof "-00-00", sizeof " BACK")];
+	if (codepoint <= 0x1F061) {
+		num = codepoint - 0x1F031;
+		orientation = "HORIZONTAL";
+	} else {
+		num = codepoint - 0x1F063;
+		orientation = "VERTICAL";
+	}
+	if (num == -1)
+		strcpy(suffix, " BACK");
+	else
+		sprintf(suffix, "-%02d-%02d", num / 7, num % 7);
+	char * name = ASPRINTF("DOMINO TILE %s%s", orientation, suffix);
+	MEM_ERR_RETURN_NULL(name);
+	return name;
 }
 
 static aliases_list * get_aliases (FILE * Name_Aliases_txt,
@@ -298,8 +346,12 @@ static char * print_aliases_list (aliases_list * aliases) {
 static char * get_name_by_rule (const unichar codepoint) {
 	if (IS_BRAILLE_PATTERN(codepoint))
 		return get_braille_pattern_name(codepoint);
+	else if (IS_VARIATION_SELECTOR(codepoint))
+		return get_variation_selector_name(codepoint);
 	else if (IS_HANGUL_SYLLABLE(codepoint))
 		return get_Hangul_syllable_name(codepoint);
+	else if (IS_DOMINO_TILE(codepoint))
+		return get_domino_tile_name(codepoint);
 	else if (IS_NONCHARACTER(codepoint))
 		return ASPRINTF("<noncharacter-%04X>", codepoint);
 	else {
